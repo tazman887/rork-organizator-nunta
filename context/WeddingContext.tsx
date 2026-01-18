@@ -1,9 +1,8 @@
 import createContextHook from "@nkzw/create-context-hook";
-import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useMemo, useEffect, useRef, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { trpc } from "@/lib/trpc";
 
-// Types
 export interface Task {
   id: string;
   title: string;
@@ -44,116 +43,133 @@ interface WeddingState {
   partnerName2: string;
 }
 
-const STORAGE_KEYS = {
-  STATE: "wedding_state",
-  TASKS: "wedding_tasks",
-  GUESTS: "wedding_guests",
-  BUDGET: "wedding_budget",
-  TABLES: "wedding_tables",
-};
-
 export const [WeddingProvider, useWedding] = createContextHook(() => {
   const queryClient = useQueryClient();
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- Wedding Details ---
-  const weddingStateQuery = useQuery({
-    queryKey: ["weddingState"],
-    queryFn: async (): Promise<WeddingState> => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.STATE);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return {
-          ...parsed,
-          weddingDate: parsed.weddingDate ? new Date(parsed.weddingDate) : null,
-        };
-      }
-      return {
-        weddingDate: null,
-        partnerName1: "",
-        partnerName2: "",
-      };
+  const dataQuery = trpc.wedding.getData.useQuery(undefined, {
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 1000 * 30,
+  });
+
+  const saveMutation = trpc.wedding.saveData.useMutation({
+    onSuccess: () => {
+      console.log("Data saved to cloud successfully");
+    },
+    onError: (error) => {
+      console.error("Failed to save data to cloud:", error);
     },
   });
 
-  const updateWeddingStateMutation = useMutation({
-    mutationFn: async (newState: WeddingState) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.STATE, JSON.stringify(newState));
-      return newState;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["weddingState"], data);
-    },
-  });
+  const weddingState: WeddingState = useMemo(() => {
+    const state = dataQuery.data?.weddingState;
+    return {
+      weddingDate: state?.weddingDate ? new Date(state.weddingDate) : null,
+      partnerName1: state?.partnerName1 || "",
+      partnerName2: state?.partnerName2 || "",
+    };
+  }, [dataQuery.data?.weddingState]);
 
-  const updateWeddingDetails = (newState: Partial<WeddingState>) => {
-    const currentState = weddingStateQuery.data || {
+  const tasks: Task[] = useMemo(() => {
+    return dataQuery.data?.tasks || [];
+  }, [dataQuery.data?.tasks]);
+
+  const guests: Guest[] = useMemo(() => {
+    return dataQuery.data?.guests || [];
+  }, [dataQuery.data?.guests]);
+
+  const expenses: Expense[] = useMemo(() => {
+    return dataQuery.data?.expenses || [];
+  }, [dataQuery.data?.expenses]);
+
+  const tables: Table[] = useMemo(() => {
+    return dataQuery.data?.tables || [];
+  }, [dataQuery.data?.tables]);
+
+  const saveToCloud = useCallback((data: {
+    weddingState: { weddingDate: string | null; partnerName1: string; partnerName2: string };
+    tasks: Task[];
+    guests: Guest[];
+    expenses: Expense[];
+    tables: Table[];
+  }) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log("Saving to cloud...");
+      saveMutation.mutate(data);
+    }, 500);
+  }, [saveMutation]);
+
+  const updateLocalAndSave = useCallback((updates: Partial<{
+    weddingState: { weddingDate: string | null; partnerName1: string; partnerName2: string };
+    tasks: Task[];
+    guests: Guest[];
+    expenses: Expense[];
+    tables: Table[];
+  }>) => {
+    const currentData = dataQuery.data || {
+      weddingState: { weddingDate: null, partnerName1: "", partnerName2: "" },
+      tasks: [],
+      guests: [],
+      expenses: [],
+      tables: [],
+    };
+
+    const newData = {
+      weddingState: updates.weddingState || currentData.weddingState,
+      tasks: updates.tasks || currentData.tasks,
+      guests: updates.guests || currentData.guests,
+      expenses: updates.expenses || currentData.expenses,
+      tables: updates.tables || currentData.tables,
+    };
+
+    queryClient.setQueryData([["wedding", "getData"], { type: "query" }], newData);
+    saveToCloud(newData);
+  }, [dataQuery.data, queryClient, saveToCloud]);
+
+  const updateWeddingDetails = useCallback((newState: Partial<WeddingState>) => {
+    const currentState = dataQuery.data?.weddingState || {
       weddingDate: null,
       partnerName1: "",
       partnerName2: "",
     };
-    updateWeddingStateMutation.mutate({ ...currentState, ...newState });
-  };
 
-  // --- Tasks ---
-  const tasksQuery = useQuery({
-    queryKey: ["tasks"],
-    queryFn: async (): Promise<Task[]> => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.TASKS);
-      if (stored) return JSON.parse(stored);
-      return [];
-    },
-  });
+    const updatedState = {
+      weddingDate: newState.weddingDate !== undefined 
+        ? (newState.weddingDate?.toISOString() || null)
+        : currentState.weddingDate,
+      partnerName1: newState.partnerName1 !== undefined ? newState.partnerName1 : currentState.partnerName1,
+      partnerName2: newState.partnerName2 !== undefined ? newState.partnerName2 : currentState.partnerName2,
+    };
 
-  const updateTasksMutation = useMutation({
-    mutationFn: async (newTasks: Task[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(newTasks));
-      return newTasks;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["tasks"], data);
-    },
-  });
+    updateLocalAndSave({ weddingState: updatedState });
+  }, [dataQuery.data?.weddingState, updateLocalAndSave]);
 
-  const toggleTask = (taskId: string) => {
-    const currentTasks = tasksQuery.data || [];
-    const newTasks = currentTasks.map((t) =>
+  const toggleTask = useCallback((taskId: string) => {
+    const currentTasks = dataQuery.data?.tasks || [];
+    const newTasks = currentTasks.map((t: Task) =>
       t.id === taskId ? { ...t, completed: !t.completed } : t
     );
-    updateTasksMutation.mutate(newTasks);
-  };
+    updateLocalAndSave({ tasks: newTasks });
+  }, [dataQuery.data?.tasks, updateLocalAndSave]);
 
-  const addTask = (title: string, category: string) => {
-    const currentTasks = tasksQuery.data || [];
+  const addTask = useCallback((title: string, category: string) => {
+    const currentTasks = dataQuery.data?.tasks || [];
     const newTask: Task = {
       id: Date.now().toString(),
       title,
       category,
       completed: false,
     };
-    updateTasksMutation.mutate([...currentTasks, newTask]);
-  };
+    updateLocalAndSave({ tasks: [...currentTasks, newTask] });
+  }, [dataQuery.data?.tasks, updateLocalAndSave]);
 
-  // --- Guests ---
-  const guestsQuery = useQuery({
-    queryKey: ["guests"],
-    queryFn: async (): Promise<Guest[]> => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.GUESTS);
-      return stored ? JSON.parse(stored) : [];
-    },
-  });
-
-  const updateGuestsMutation = useMutation({
-    mutationFn: async (newGuests: Guest[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.GUESTS, JSON.stringify(newGuests));
-      return newGuests;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["guests"], data);
-    },
-  });
-
-  const addGuest = (name: string, side: "groom" | "bride", numberOfPeople: number = 1, numberOfChildren: number = 0, specialMenuNotes: string = "") => {
-    const currentGuests = guestsQuery.data || [];
+  const addGuest = useCallback((name: string, side: "groom" | "bride", numberOfPeople: number = 1, numberOfChildren: number = 0, specialMenuNotes: string = "") => {
+    const currentGuests = dataQuery.data?.guests || [];
     const newGuest: Guest = {
       id: Date.now().toString(),
       name,
@@ -166,14 +182,14 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
       invitationSent: false,
       specialMenuNotes,
     };
-    updateGuestsMutation.mutate([...currentGuests, newGuest]);
-  };
+    updateLocalAndSave({ guests: [...currentGuests, newGuest] });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
 
-  const updateGuestStatus = (id: string, status: Guest["status"], confirmedPeople?: number, confirmedChildren?: number) => {
-    const currentGuests = guestsQuery.data || [];
-    const newGuests = currentGuests.map((g) => {
+  const updateGuestStatus = useCallback((id: string, status: Guest["status"], confirmedPeople?: number, confirmedChildren?: number) => {
+    const currentGuests = dataQuery.data?.guests || [];
+    const newGuests = currentGuests.map((g: Guest) => {
       if (g.id === id) {
-        const updatedGuest = { 
+        const updatedGuest: Guest = { 
           ...g, 
           status, 
           confirmedPeople: confirmedPeople !== undefined ? confirmedPeople : (status === 'confirmed' ? g.numberOfPeople : 0),
@@ -188,126 +204,94 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
       }
       return g;
     });
-    updateGuestsMutation.mutate(newGuests);
-  };
+    updateLocalAndSave({ guests: newGuests });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
 
-  const deleteGuest = (id: string) => {
-    const currentGuests = guestsQuery.data || [];
-    const newGuests = currentGuests.filter((g) => g.id !== id);
-    updateGuestsMutation.mutate(newGuests);
-  };
+  const deleteGuest = useCallback((id: string) => {
+    const currentGuests = dataQuery.data?.guests || [];
+    const newGuests = currentGuests.filter((g: Guest) => g.id !== id);
+    updateLocalAndSave({ guests: newGuests });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
 
-  const updateGuest = (id: string, name: string, side: "groom" | "bride", numberOfPeople: number, numberOfChildren: number, specialMenuNotes: string) => {
-    const currentGuests = guestsQuery.data || [];
-    const newGuests = currentGuests.map((g) =>
+  const updateGuest = useCallback((id: string, name: string, side: "groom" | "bride", numberOfPeople: number, numberOfChildren: number, specialMenuNotes: string) => {
+    const currentGuests = dataQuery.data?.guests || [];
+    const newGuests = currentGuests.map((g: Guest) =>
       g.id === id ? { ...g, name, side, numberOfPeople, numberOfChildren, specialMenuNotes } : g
     );
-    updateGuestsMutation.mutate(newGuests);
-  };
+    updateLocalAndSave({ guests: newGuests });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
 
-  const toggleInvitationSent = (id: string) => {
-    const currentGuests = guestsQuery.data || [];
-    const newGuests = currentGuests.map((g) =>
+  const toggleInvitationSent = useCallback((id: string) => {
+    const currentGuests = dataQuery.data?.guests || [];
+    const newGuests = currentGuests.map((g: Guest) =>
       g.id === id ? { ...g, invitationSent: !g.invitationSent } : g
     );
-    updateGuestsMutation.mutate(newGuests);
-  };
+    updateLocalAndSave({ guests: newGuests });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
 
-  // --- Budget ---
-  const budgetQuery = useQuery({
-    queryKey: ["budget"],
-    queryFn: async (): Promise<Expense[]> => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.BUDGET);
-      if (stored) return JSON.parse(stored);
-      return [];
-    },
-  });
-
-  const updateBudgetMutation = useMutation({
-    mutationFn: async (newExpenses: Expense[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.BUDGET, JSON.stringify(newExpenses));
-      return newExpenses;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["budget"], data);
-    },
-  });
-
-  const addExpense = (title: string, amount: number, category: string) => {
-    const currentExpenses = budgetQuery.data || [];
+  const addExpense = useCallback((title: string, amount: number, category: string) => {
+    const currentExpenses = dataQuery.data?.expenses || [];
     const newExpense: Expense = {
       id: Date.now().toString(),
       title,
       amount,
       category,
     };
-    updateBudgetMutation.mutate([...currentExpenses, newExpense]);
-  };
+    updateLocalAndSave({ expenses: [...currentExpenses, newExpense] });
+  }, [dataQuery.data?.expenses, updateLocalAndSave]);
 
   const totalBudget = useMemo(() => {
-    return (budgetQuery.data || []).reduce((acc, curr) => acc + curr.amount, 0);
-  }, [budgetQuery.data]);
+    return expenses.reduce((acc, curr) => acc + curr.amount, 0);
+  }, [expenses]);
 
-  // --- Tables ---
-  const tablesQuery = useQuery({
-    queryKey: ["tables"],
-    queryFn: async (): Promise<Table[]> => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.TABLES);
-      if (stored) return JSON.parse(stored);
-      return [];
-    },
-  });
-
-  const updateTablesMutation = useMutation({
-    mutationFn: async (newTables: Table[]) => {
-      await AsyncStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(newTables));
-      return newTables;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["tables"], data);
-    },
-  });
-
-  const addTable = (number: number, seats: number) => {
-    const currentTables = tablesQuery.data || [];
+  const addTable = useCallback((number: number, seats: number) => {
+    const currentTables = dataQuery.data?.tables || [];
     const newTable: Table = {
       id: Date.now().toString(),
       number,
       seats,
     };
-    updateTablesMutation.mutate([...currentTables, newTable]);
-  };
+    updateLocalAndSave({ tables: [...currentTables, newTable] });
+  }, [dataQuery.data?.tables, updateLocalAndSave]);
 
-  const deleteTable = (id: string) => {
-    const currentTables = tablesQuery.data || [];
-    const newTables = currentTables.filter((t) => t.id !== id);
-    updateTablesMutation.mutate(newTables);
+  const deleteTable = useCallback((id: string) => {
+    const currentTables = dataQuery.data?.tables || [];
+    const newTables = currentTables.filter((t: Table) => t.id !== id);
     
-    const currentGuests = guestsQuery.data || [];
-    const updatedGuests = currentGuests.map((g) =>
+    const currentGuests = dataQuery.data?.guests || [];
+    const updatedGuests = currentGuests.map((g: Guest) =>
       g.tableId === id ? { ...g, tableId: undefined } : g
     );
-    updateGuestsMutation.mutate(updatedGuests);
-  };
+    
+    updateLocalAndSave({ tables: newTables, guests: updatedGuests });
+  }, [dataQuery.data?.tables, dataQuery.data?.guests, updateLocalAndSave]);
 
-  const assignGuestToTable = (guestId: string, tableId: string | undefined) => {
-    const currentGuests = guestsQuery.data || [];
-    const newGuests = currentGuests.map((g) =>
+  const assignGuestToTable = useCallback((guestId: string, tableId: string | undefined) => {
+    const currentGuests = dataQuery.data?.guests || [];
+    const newGuests = currentGuests.map((g: Guest) =>
       g.id === guestId ? { ...g, tableId } : g
     );
-    updateGuestsMutation.mutate(newGuests);
-  };
+    updateLocalAndSave({ guests: newGuests });
+  }, [dataQuery.data?.guests, updateLocalAndSave]);
+
+  const refetchData = useCallback(() => {
+    dataQuery.refetch();
+  }, [dataQuery]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return {
-    weddingState: weddingStateQuery.data || {
-      weddingDate: null,
-      partnerName1: "",
-      partnerName2: "",
-    },
-    tasks: tasksQuery.data || [],
-    guests: guestsQuery.data || [],
-    expenses: budgetQuery.data || [],
-    tables: tablesQuery.data || [],
+    weddingState,
+    tasks,
+    guests,
+    expenses,
+    tables,
     totalBudget,
     toggleTask,
     addTask,
@@ -320,7 +304,9 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
     addTable,
     deleteTable,
     assignGuestToTable,
-    isLoading: tasksQuery.isLoading || guestsQuery.isLoading || budgetQuery.isLoading || weddingStateQuery.isLoading || tablesQuery.isLoading,
+    isLoading: dataQuery.isLoading,
+    isSaving: saveMutation.isPending,
     updateWeddingDetails,
+    refetchData,
   };
 });
