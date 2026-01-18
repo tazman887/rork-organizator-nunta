@@ -76,13 +76,13 @@ export const weddingRouter = createTRPCRouter({
   getData: publicProcedure.query(async () => {
     try {
       const result = await dbQuery(`
-        SELECT * FROM wedding_data WHERE id = 'main';
+        SELECT * FROM wedding_data:main;
       `);
 
       console.log("getData result:", JSON.stringify(result));
 
-      if (result?.[0]?.result?.[0]) {
-        const data = result[0].result[0];
+      const data = result?.[0]?.result?.[0];
+      if (data) {
         return {
           weddingState: data.weddingState || { weddingDate: null, partnerName1: "", partnerName2: "" },
           tasks: data.tasks || [],
@@ -123,16 +123,15 @@ export const weddingRouter = createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       try {
-        const query = `
-          UPSERT wedding_data SET 
-            weddingState = ${JSON.stringify(input.weddingState)},
-            tasks = ${JSON.stringify(input.tasks)},
-            guests = ${JSON.stringify(input.guests)},
-            expenses = ${JSON.stringify(input.expenses)},
-            tables = ${JSON.stringify(input.tables)},
-            updatedAt = time::now()
-          WHERE id = 'main';
-        `;
+        const content = {
+          weddingState: input.weddingState,
+          tasks: input.tasks,
+          guests: input.guests,
+          expenses: input.expenses,
+          tables: input.tables,
+        };
+
+        const query = `UPSERT wedding_data:main CONTENT ${JSON.stringify(content)};`;
 
         console.log("Saving data to cloud...");
         const result = await dbQuery(query);
