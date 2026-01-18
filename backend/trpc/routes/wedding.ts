@@ -6,10 +6,16 @@ const DB_NAMESPACE = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
 const DB_TOKEN = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
 
 async function dbQuery(query: string) {
+  if (!DB_ENDPOINT || !DB_TOKEN) {
+    console.error("Database configuration missing", { DB_ENDPOINT: !!DB_ENDPOINT, DB_TOKEN: !!DB_TOKEN });
+    throw new Error("Database configuration missing");
+  }
+
   const response = await fetch(`${DB_ENDPOINT}/sql`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": "text/plain",
+      "Accept": "application/json",
       "Authorization": `Bearer ${DB_TOKEN}`,
       "surreal-ns": DB_NAMESPACE || "default",
       "surreal-db": "wedding",
