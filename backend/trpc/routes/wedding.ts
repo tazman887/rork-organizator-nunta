@@ -9,18 +9,23 @@ const DATA_KEY = "wedding_app_data";
 
 async function dbGet(key: string) {
   if (!DB_ENDPOINT || !DB_TOKEN || !DB_NAMESPACE) {
-    console.error("Database configuration missing");
+    console.error("Database configuration missing", { DB_ENDPOINT: !!DB_ENDPOINT, DB_TOKEN: !!DB_TOKEN, DB_NAMESPACE: !!DB_NAMESPACE });
     return null;
   }
 
   try {
-    const response = await fetch(`${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`, {
+    const url = `${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`;
+    console.log("DB GET URL:", url);
+    
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         "Accept": "application/json",
         "Authorization": `Bearer ${DB_TOKEN}`,
       },
     });
+
+    console.log("DB GET Response status:", response.status);
 
     if (response.status === 404) {
       console.log("Key not found, returning null");
@@ -29,7 +34,14 @@ async function dbGet(key: string) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("DB GET Error:", errorText);
+      console.error("DB GET Error:", response.status, errorText);
+      return null;
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const text = await response.text();
+      console.error("DB GET unexpected content type:", contentType, text.substring(0, 200));
       return null;
     }
 
@@ -43,27 +55,40 @@ async function dbGet(key: string) {
 
 async function dbSet(key: string, value: unknown) {
   if (!DB_ENDPOINT || !DB_TOKEN || !DB_NAMESPACE) {
-    console.error("Database configuration missing");
+    console.error("Database configuration missing", { DB_ENDPOINT: !!DB_ENDPOINT, DB_TOKEN: !!DB_TOKEN, DB_NAMESPACE: !!DB_NAMESPACE });
     throw new Error("Database configuration missing");
   }
 
-  const response = await fetch(`${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "Authorization": `Bearer ${DB_TOKEN}`,
-    },
-    body: JSON.stringify(value),
-  });
+  try {
+    const url = `${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`;
+    console.log("DB SET URL:", url);
+    console.log("DB SET payload size:", JSON.stringify(value).length, "bytes");
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("DB SET Error:", errorText);
-    throw new Error("Database save failed");
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${DB_TOKEN}`,
+      },
+      body: JSON.stringify(value),
+    });
+
+    console.log("DB SET Response status:", response.status);
+
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type");
+      const errorText = await response.text();
+      console.error("DB SET Error:", response.status, contentType, errorText.substring(0, 500));
+      throw new Error(`Database save failed: ${response.status}`);
+    }
+
+    console.log("DB SET Success");
+    return true;
+  } catch (error) {
+    console.error("DB SET Exception:", error);
+    throw error;
   }
-
-  return true;
 }
 
 const TaskSchema = z.object({

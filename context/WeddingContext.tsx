@@ -59,7 +59,10 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
     },
     onError: (error) => {
       console.error("Failed to save data to cloud:", error);
+      console.error("Error details:", JSON.stringify(error, null, 2));
     },
+    retry: 2,
+    retryDelay: 1000,
   });
 
   const weddingState: WeddingState = useMemo(() => {
