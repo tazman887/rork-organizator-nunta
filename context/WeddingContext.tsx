@@ -68,9 +68,9 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
         };
       }
       return {
-        weddingDate: new Date("2026-06-20"),
-        partnerName1: "Eu",
-        partnerName2: "Partenerul",
+        weddingDate: null,
+        partnerName1: "",
+        partnerName2: "",
       };
     },
   });
@@ -87,9 +87,9 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
 
   const updateWeddingDetails = (newState: Partial<WeddingState>) => {
     const currentState = weddingStateQuery.data || {
-      weddingDate: new Date("2026-06-20"),
-      partnerName1: "Eu",
-      partnerName2: "Partenerul",
+      weddingDate: null,
+      partnerName1: "",
+      partnerName2: "",
     };
     updateWeddingStateMutation.mutate({ ...currentState, ...newState });
   };
@@ -100,14 +100,7 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
     queryFn: async (): Promise<Task[]> => {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.TASKS);
       if (stored) return JSON.parse(stored);
-      // Default tasks
-      return [
-        { id: "1", title: "Alege data nunții", category: "Planificare", completed: true },
-        { id: "2", title: "Rezervă locația", category: "Locație", completed: false },
-        { id: "3", title: "Trimite invitații", category: "Invitați", completed: false },
-        { id: "4", title: "Alege fotograful", category: "Furnizori", completed: false },
-        { id: "5", title: "Cumpără rochia", category: "Ținute", completed: false },
-      ];
+      return [];
     },
   });
 
@@ -226,10 +219,7 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
     queryFn: async (): Promise<Expense[]> => {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.BUDGET);
       if (stored) return JSON.parse(stored);
-      return [
-        { id: "1", title: "Avans Locație", amount: 5000, category: "Locație" },
-        { id: "2", title: "Rochie Mireasă", amount: 4000, category: "Ținute" },
-      ];
+      return [];
     },
   });
 
@@ -264,11 +254,7 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
     queryFn: async (): Promise<Table[]> => {
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.TABLES);
       if (stored) return JSON.parse(stored);
-      return [
-        { id: "1", number: 1, seats: 8 },
-        { id: "2", number: 2, seats: 8 },
-        { id: "3", number: 3, seats: 10 },
-      ];
+      return [];
     },
   });
 
@@ -314,9 +300,9 @@ export const [WeddingProvider, useWedding] = createContextHook(() => {
 
   return {
     weddingState: weddingStateQuery.data || {
-      weddingDate: new Date("2026-06-20"),
-      partnerName1: "Eu",
-      partnerName2: "Partenerul",
+      weddingDate: null,
+      partnerName1: "",
+      partnerName2: "",
     },
     tasks: tasksQuery.data || [],
     guests: guestsQuery.data || [],
