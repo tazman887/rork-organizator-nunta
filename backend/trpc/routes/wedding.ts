@@ -5,31 +5,65 @@ const DB_ENDPOINT = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
 const DB_NAMESPACE = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
 const DB_TOKEN = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
 
-async function dbQuery(query: string) {
-  if (!DB_ENDPOINT || !DB_TOKEN) {
-    console.error("Database configuration missing", { DB_ENDPOINT: !!DB_ENDPOINT, DB_TOKEN: !!DB_TOKEN });
+const DATA_KEY = "wedding_app_data";
+
+async function dbGet(key: string) {
+  if (!DB_ENDPOINT || !DB_TOKEN || !DB_NAMESPACE) {
+    console.error("Database configuration missing");
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${DB_TOKEN}`,
+      },
+    });
+
+    if (response.status === 404) {
+      console.log("Key not found, returning null");
+      return null;
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("DB GET Error:", errorText);
+      return null;
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("DB GET Exception:", error);
+    return null;
+  }
+}
+
+async function dbSet(key: string, value: unknown) {
+  if (!DB_ENDPOINT || !DB_TOKEN || !DB_NAMESPACE) {
+    console.error("Database configuration missing");
     throw new Error("Database configuration missing");
   }
 
-  const response = await fetch(`${DB_ENDPOINT}/sql`, {
-    method: "POST",
+  const response = await fetch(`${DB_ENDPOINT}/kv/${DB_NAMESPACE}/${key}`, {
+    method: "PUT",
     headers: {
-      "Content-Type": "text/plain",
+      "Content-Type": "application/json",
       "Accept": "application/json",
       "Authorization": `Bearer ${DB_TOKEN}`,
-      "surreal-ns": DB_NAMESPACE || "default",
-      "surreal-db": "wedding",
     },
-    body: query,
+    body: JSON.stringify(value),
   });
 
   if (!response.ok) {
-    console.error("DB Error:", await response.text());
-    throw new Error("Database query failed");
+    const errorText = await response.text();
+    console.error("DB SET Error:", errorText);
+    throw new Error("Database save failed");
   }
 
-  const result = await response.json();
-  return result;
+  return true;
 }
 
 const TaskSchema = z.object({
@@ -72,19 +106,24 @@ const WeddingStateSchema = z.object({
   partnerName2: z.string(),
 });
 
+const defaultData = {
+  weddingState: { weddingDate: null, partnerName1: "", partnerName2: "" },
+  tasks: [],
+  guests: [],
+  expenses: [],
+  tables: [],
+};
+
 export const weddingRouter = createTRPCRouter({
   getData: publicProcedure.query(async () => {
     try {
-      const result = await dbQuery(`
-        SELECT * FROM wedding_data:main;
-      `);
-
-      console.log("getData result:", JSON.stringify(result));
-
-      const data = result?.[0]?.result?.[0];
+      console.log("Fetching wedding data...");
+      const data = await dbGet(DATA_KEY);
+      
       if (data) {
+        console.log("Data found, returning...");
         return {
-          weddingState: data.weddingState || { weddingDate: null, partnerName1: "", partnerName2: "" },
+          weddingState: data.weddingState || defaultData.weddingState,
           tasks: data.tasks || [],
           guests: data.guests || [],
           expenses: data.expenses || [],
@@ -92,22 +131,11 @@ export const weddingRouter = createTRPCRouter({
         };
       }
 
-      return {
-        weddingState: { weddingDate: null, partnerName1: "", partnerName2: "" },
-        tasks: [],
-        guests: [],
-        expenses: [],
-        tables: [],
-      };
+      console.log("No data found, returning defaults");
+      return defaultData;
     } catch (error) {
       console.error("Error fetching data:", error);
-      return {
-        weddingState: { weddingDate: null, partnerName1: "", partnerName2: "" },
-        tasks: [],
-        guests: [],
-        expenses: [],
-        tables: [],
-      };
+      return defaultData;
     }
   }),
 
@@ -129,13 +157,12 @@ export const weddingRouter = createTRPCRouter({
           guests: input.guests,
           expenses: input.expenses,
           tables: input.tables,
+          updatedAt: new Date().toISOString(),
         };
 
-        const query = `UPSERT wedding_data:main CONTENT ${JSON.stringify(content)};`;
-
         console.log("Saving data to cloud...");
-        const result = await dbQuery(query);
-        console.log("Save result:", JSON.stringify(result));
+        await dbSet(DATA_KEY, content);
+        console.log("Data saved successfully");
 
         return { success: true };
       } catch (error) {
